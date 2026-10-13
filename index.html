@@ -1812,15 +1812,12 @@ if ('launchQueue' in window) {
     const n = params.files?.length || 0;
     console.info('[MiPDFeditor] lanzamiento', { archivos: n, url: params.targetURL });
     await booted;
-    if (!n) { if (matchMedia('(display-mode: standalone)').matches) toast('Diagnóstico: la app se abrió sin recibir ningún archivo.'); return; }
-    toast(`Diagnóstico: recibido ${params.files[0].name}`);
+    if (!n) return;
     try {
       const files = await Promise.all(params.files.map(h => h.getFile()));
       await addFiles(files, { replace: true, handle: params.files[0] });
     } catch (e) { console.error(e); toast('No se pudo leer el archivo recibido: ' + (e.message || e), true); }
   });
-} else if (matchMedia('(display-mode: standalone)').matches) {
-  toast('Diagnóstico: este Edge no ofrece apertura de archivos a la app (launchQueue no disponible).', true);
 }
 /* offline cache + install button (only when served over http/https) */
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
