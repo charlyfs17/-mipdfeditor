@@ -218,6 +218,23 @@ details.box>summary small{font:500 10px/1 var(--f-label);text-transform:uppercas
   .brand-txt{display:none}
 }
 #print-root{display:none}
+.modal.wide{width:min(1160px,100%);height:min(90vh,920px)}
+.modal.wide .modal-b{flex:1;padding:0;display:grid;grid-template-columns:300px minmax(0,1fr);overflow:hidden;gap:0}
+.pv-side{padding:6px 16px 16px;overflow:auto;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:8px;min-height:0}
+.pv-main{display:flex;flex-direction:column;min-height:0;min-width:0;background-color:var(--desk);background-image:linear-gradient(var(--desk-line) 1px,transparent 1px),linear-gradient(90deg,var(--desk-line) 1px,transparent 1px);background-size:24px 24px}
+.pv-top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 14px;border-bottom:1px solid var(--line);background:var(--surface)}
+.pv-sum{font:12px/1.4 var(--f-mono);color:var(--muted);flex:1;min-width:0}
+.pv-sum b{color:var(--fg);font-weight:500}
+.pv-sum.err{color:var(--danger)}
+.pv-zoom{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.pv-zoom input{width:120px}
+.pv-area{flex:1;overflow:auto;display:flex;flex-wrap:wrap;gap:26px 22px;justify-content:center;align-content:flex-start;padding:24px}
+.pv-sheet{display:flex;flex-direction:column;align-items:center;gap:7px}
+.pv-paper{background:#fff;box-shadow:var(--shadow-sheet);display:flex;align-items:center;justify-content:center;overflow:hidden}
+.pv-paper canvas{display:block;max-width:100%;max-height:100%}
+.pv-paper .spin{border-color:#dfe3ec;border-top-color:#2a45d4}
+.pv-label{font:11px/1.2 var(--f-mono);color:var(--muted);text-align:center;font-variant-numeric:tabular-nums}
+@media (max-width:780px){ .modal.wide{height:94vh} .modal.wide .modal-b{grid-template-columns:1fr;grid-template-rows:auto minmax(320px,1fr);overflow:auto} .pv-side{border-right:0;border-bottom:1px solid var(--line)} }
 .pr-opts{display:flex;flex-direction:column;gap:8px}
 .pr-opts label.check{align-items:center}
 @media print{
@@ -1483,12 +1500,12 @@ function updateStatus() {
 const SIG_KEY = 'mipdfeditor.firma';
 function loadSavedSig() { try { return localStorage.getItem(SIG_KEY); } catch { return null; } }
 function storeSig(d) { try { d ? localStorage.setItem(SIG_KEY, d) : localStorage.removeItem(SIG_KEY); } catch {} }
-function modal(title, body, actions) {
+function modal(title, body, actions, opts = {}) {
   const bg = el('div', { class: 'modal-bg' });
-  const close = () => { bg.remove(); document.removeEventListener('keydown', esc, true); };
+  const close = () => { bg.remove(); document.removeEventListener('keydown', esc, true); opts.onClose?.(); };
   const esc = e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
   document.addEventListener('keydown', esc, true);
-  const m = el('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
+  const m = el('div', { class: 'modal' + (opts.wide ? ' wide' : ''), role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
     el('div', { class: 'modal-h' }, el('span', { text: title }), el('button', { class: 'btn icon ghost', 'aria-label': 'Cerrar', onclick: close }, icon('close'))),
     el('div', { class: 'modal-b' }, body), el('div', { class: 'modal-f' }, actions(close)));
   bg.append(m); bg.addEventListener('pointerdown', e => { if (e.target === bg) close(); });
@@ -1707,86 +1724,128 @@ function clearPrint() { printUrls.forEach(u => URL.revokeObjectURL(u)); printUrl
 window.addEventListener('afterprint', () => setTimeout(clearPrint, 300));
 // printing from the browser menu instead of our button: show a hint rather than the app UI
 window.addEventListener('beforeprint', () => { if (!printing && !$('#print-root').children.length) $('#print-root').innerHTML = '<div class="pr-empty">Para imprimir el documento usa el botón <b>Imprimir</b> de MiPDFeditor o <b>Ctrl+P</b>.</div>'; });
+/* one plan drives both the preview and the printout, so what you see is what prints */
+const escH = v => String(v ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const PAPERS = [['A5', 148, 210], ['A4', 210, 297], ['A3', 297, 420], ['A2', 420, 594], ['A1', 594, 841], ['Carta', 215.9, 279.4], ['Legal', 215.9, 355.6]];
+function paperName(wmm, hmm) { const a = Math.min(wmm, hmm), b = Math.max(wmm, hmm); const f = PAPERS.find(([, x, y]) => Math.abs(a - x) < 2 && Math.abs(b - y) < 2); return `${f ? f[0] : `${Math.round(wmm)} × ${Math.round(hmm)} mm`} ${wmm > hmm ? 'horizontal' : 'vertical'}`; }
+function printPlan(list, mode) {
+  const dims = list.map(pg => dispSize(pg));
+  const portrait = dims.filter(d => d.height >= d.width).length >= dims.length / 2;
+  return list.map((pg, i) => {
+    const d = dims[i], isP = d.height >= d.width;
+    const turn = mode === 'fit' && isP !== portrait ? (totalRot(pg) === 270 ? 90 : -90) : 0;
+    const wPt = turn ? d.height : d.width, hPt = turn ? d.width : d.height;
+    const paper = mode === 'fit' ? (portrait ? [210, 297] : [297, 210]) : [d.width * 25.4 / 72, d.height * 25.4 / 72];
+    return { pg, idx: S.pages.indexOf(pg), turn, wPt, hPt, paper, portrait, mode };
+  });
+}
+function turnCanvas(c, turn) {
+  if (!turn) return c;
+  const r = document.createElement('canvas'); r.width = c.height; r.height = c.width; const x = r.getContext('2d');
+  if (turn > 0) { x.translate(r.width, 0); x.rotate(Math.PI / 2); } else { x.translate(0, r.height); x.rotate(-Math.PI / 2); }
+  x.drawImage(c, 0, 0); c.width = c.height = 0; return r;
+}
 function openPrintDialog() {
   if (!S.pages.length) return toast('No hay ningún documento abierto.', true);
   closeTextEditor(true);
   const n = S.pages.length, curIdx = Math.max(0, S.pages.findIndex(p => p.uid === S.current)), nSel = S.pages.filter(p => S.sel.has(p.uid)).length;
   const radio = (v, label, checked, disabled) => el('label', { class: 'check' }, el('input', { type: 'radio', name: 'pr-scope', value: v, checked, disabled }), label);
-  const range = el('input', { class: 'inp', id: 'pr-range', placeholder: 'p. ej. 1-3, 5, 8-fin', style: 'font-family:var(--f-mono);max-width:220px', spellcheck: 'false' });
-  range.addEventListener('focus', () => { body.querySelector('input[value="range"]').checked = true; });
+  const range = el('input', { class: 'inp', id: 'pr-range', placeholder: 'p. ej. 1-3, 5, 8-fin', style: 'font-family:var(--f-mono);max-width:200px', spellcheck: 'false' });
   const quality = el('select', { class: 'inp', id: 'pr-q' }, el('option', { value: '200', text: 'Normal (200 ppp)' }), el('option', { value: '300', text: 'Alta (300 ppp) · planos y letra pequeña' }));
   const ann = el('input', { type: 'checkbox', id: 'pr-ann', checked: true });
-  const fit = el('select', { class: 'inp', id: 'pr-fit' }, el('option', { value: 'real', text: 'Tamaño real (100 %)' }), el('option', { value: 'fit', text: 'Ajustar al papel (gira las páginas apaisadas)' }));
-  const fitHint = el('p', { class: 'hint', style: 'margin-top:-4px' });
-  const scopeList = () => {
-    const scope = body.querySelector('input[name="pr-scope"]:checked')?.value || 'all';
-    try { return scope === 'all' ? S.pages : scope === 'cur' ? [S.pages[curIdx]] : scope === 'sel' ? S.pages.filter(p => S.sel.has(p.uid)) : parseRanges(range.value, n).flatMap(g => g.idx).map(i => S.pages[i]); } catch { return S.pages; }
-  };
-  const sizeKey = pg => { const d = dispSize(pg); return `${Math.round(d.width)}x${Math.round(d.height)}`; };
-  const syncFit = (auto) => {
-    const mixed = new Set(scopeList().map(sizeKey)).size > 1;
-    fit.querySelector('option[value="real"]').disabled = mixed;
-    if (mixed || auto === true) fit.value = mixed ? 'fit' : 'real';
-    fitHint.textContent = mixed ? 'Las páginas elegidas tienen tamaños u orientaciones distintas: se ajustan al papel que elijas en la impresora.' : fit.value === 'real' ? 'Cada hoja a su medida exacta: útil para planos a escala. Elige en la impresora un papel de ese tamaño.' : 'Se ajusta al papel que elijas en la impresora.';
-  };
-  fit.addEventListener('change', () => syncFit(false));
-  const body = el('div', { class: 'pr-opts' },
+  const fit = el('select', { class: 'inp', id: 'pr-fit' }, el('option', { value: 'real', text: 'Tamaño real (100 %)' }), el('option', { value: 'fit', text: 'Ajustar al papel (gira las apaisadas)' }));
+  const fitHint = el('p', { class: 'hint', style: 'margin-top:-2px' });
+  const side = el('div', { class: 'pv-side' },
     el('div', { class: 'sec-title', text: 'Páginas' }),
     radio('all', `Todas (${n})`, true), radio('cur', `Página actual (${curIdx + 1})`, false),
     radio('sel', `Seleccionadas${nSel ? ` (${nSel})` : ''}`, false, !nSel),
     el('div', { class: 'row' }, radio('range', 'Rango:', false), range),
-    el('div', { class: 'sec-title', style: 'margin-top:6px', text: 'Opciones' }),
+    el('div', { class: 'sec-title', style: 'margin-top:8px', text: 'Opciones' }),
     el('label', { class: 'field' }, el('span', { text: 'Tamaño' }), fit), fitHint,
     el('label', { class: 'field' }, el('span', { text: 'Calidad' }), quality),
     el('label', { class: 'check' }, ann, 'Incluir anotaciones, firmas, marca de agua y numeración'),
-    el('p', { class: 'hint', text: 'En el siguiente paso eliges impresora, copias, doble cara y papel. Cada página se imprime a su tamaño real.' }));
-  body.addEventListener('change', e => { if (e.target.name === 'pr-scope') syncFit(true); });
-  range.addEventListener('input', () => syncFit(true));
-  syncFit(true);
-  modal('Imprimir', body, close => [
+    el('p', { class: 'hint', style: 'margin-top:6px', text: 'Al pulsar Imprimir se abre la ventana de Windows/Edge para elegir impresora, copias y doble cara.' }));
+  const sum = el('div', { class: 'pv-sum' });
+  const zoom = el('input', { type: 'range', min: '180', max: '640', step: '20', value: '340', 'aria-label': 'Tamaño de la vista previa' });
+  const area = el('div', { class: 'pv-area' });
+  const main = el('div', { class: 'pv-main' }, el('div', { class: 'pv-top' }, sum, el('label', { class: 'pv-zoom' }, 'Vista', zoom)), area);
+  const body = el('div', { style: 'display:contents' }, side, main);
+
+  const cache = new Map(); let gen = 0, plan = [], io = null, userFit = false;
+  fit.addEventListener('change', () => { userFit = true; });
+  const scope = () => side.querySelector('input[name="pr-scope"]:checked').value;
+  const listNow = () => { const sc = scope(); return sc === 'all' ? S.pages : sc === 'cur' ? [S.pages[curIdx]] : sc === 'sel' ? S.pages.filter(p => S.sel.has(p.uid)) : parseRanges(range.value, n).flatMap(g => g.idx).map(i => S.pages[i]); };
+  const sizeKey = pg => { const d = dispSize(pg); return `${Math.round(d.width)}x${Math.round(d.height)}`; };
+  async function drawSheet(item, holder, g) {
+    const H = +zoom.value, dpr = Math.min(window.devicePixelRatio || 1, 2), key = `${item.pg.uid}|${ann.checked}|${item.turn}|${H}`;
+    let c = cache.get(key);
+    if (!c) {
+      const sc = (H * 1.15 * dpr) / Math.max(item.wPt, item.hPt);
+      const r = await rasterPage(item.pg, sc, { annots: ann.checked });
+      if (g !== gen) return;
+      c = turnCanvas(r.canvas, item.turn); cache.set(key, c);
+    }
+    if (g !== gen) return;
+    const out = el('canvas'); out.width = c.width; out.height = c.height; out.getContext('2d').drawImage(c, 0, 0);
+    holder.replaceChildren(out);
+  }
+  function rebuild() {
+    gen++; const g = gen; io?.disconnect(); area.replaceChildren();
+    let list;
+    try { list = listNow(); } catch (e) { sum.className = 'pv-sum err'; sum.textContent = e.message; plan = []; return; }
+    const mixed = new Set(list.map(sizeKey)).size > 1;
+    fit.querySelector('option[value="real"]').disabled = mixed;
+    if (mixed) fit.value = 'fit'; else if (!userFit) fit.value = 'real';
+    const mode = fit.value;
+    fitHint.textContent = mixed ? 'Hay páginas de distinto tamaño u orientación: se ajustan al papel.' : mode === 'real' ? 'Cada hoja a su medida exacta: útil para planos a escala.' : 'Se ajusta al papel; en la vista previa se muestra sobre A4.';
+    plan = printPlan(list, mode);
+    const papers = [...new Set(plan.map(it => paperName(it.paper[0], it.paper[1])))];
+    sum.className = 'pv-sum';
+    sum.innerHTML = `<b>${plan.length}</b> ${plan.length === 1 ? 'hoja' : 'hojas'} · ${mode === 'real' ? 'tamaño real' : 'ajustado al papel'} · ${escH(papers.join(', '))}${ann.checked ? '' : ' · sin anotaciones'}`;
+    const H = +zoom.value;
+    io = new IntersectionObserver(es => { for (const e of es) if (e.isIntersecting) { io.unobserve(e.target); drawSheet(e.target._item, e.target, g); } }, { root: area, rootMargin: '300px' });
+    plan.forEach((it, k) => {
+      const [pw, ph] = it.paper, h = H, w = Math.round(H * pw / ph);
+      const paper = el('div', { class: 'pv-paper', style: `width:${w}px;height:${h}px` }, el('div', { class: 'spin' }));
+      if (it.mode === 'real') { paper.style.alignItems = 'stretch'; paper.style.justifyContent = 'stretch'; }
+      paper._item = it;
+      area.append(el('div', { class: 'pv-sheet' }, paper, el('div', { class: 'pv-label', text: `Hoja ${k + 1} de ${plan.length} · pág. ${it.idx + 1}${it.turn ? ' · girada' : ''}` })));
+      io.observe(paper);
+    });
+  }
+  side.addEventListener('change', e => { if (e.target === quality) return; rebuild(); });
+  range.addEventListener('focus', () => { side.querySelector('input[value="range"]').checked = true; });
+  let rt; range.addEventListener('input', () => { side.querySelector('input[value="range"]').checked = true; clearTimeout(rt); rt = setTimeout(rebuild, 300); });
+  let zt; zoom.addEventListener('input', () => { clearTimeout(zt); zt = setTimeout(rebuild, 120); });
+  modal('Vista previa de impresión', body, close => [
     el('button', { class: 'btn', onclick: close }, 'Cancelar'),
     el('button', { class: 'btn primary', onclick: async () => {
-      const scope = body.querySelector('input[name="pr-scope"]:checked').value; let list;
-      try {
-        if (scope === 'all') list = S.pages;
-        else if (scope === 'cur') list = [S.pages[curIdx]];
-        else if (scope === 'sel') list = S.pages.filter(p => S.sel.has(p.uid));
-        else list = parseRanges(range.value, n).flatMap(g => g.idx).map(i => S.pages[i]);
-      } catch (e) { return toast(e.message, true); }
-      if (!list.length) return toast('No hay páginas que imprimir.', true);
-      const mode = new Set(list.map(sizeKey)).size > 1 ? 'fit' : fit.value;
-      close(); await doPrint(list, +quality.value, ann.checked, mode);
-    } }, icon('print'), 'Imprimir')]);
+      if (!plan.length) return toast('No hay páginas que imprimir.', true);
+      const p = plan, q = +quality.value, a = ann.checked; close(); await doPrint(p, q, a);
+    } }, icon('print'), 'Imprimir')], { wide: true, onClose: () => { gen++; io?.disconnect(); cache.clear(); } });
+  requestAnimationFrame(rebuild);
 }
-async function doPrint(list, dpi, annots, mode = 'real') {
+async function doPrint(plan, dpi, annots) {
   clearPrint(); printing = true;
-  const root = $('#print-root'), imgs = [];
-  // 'fit': every page fills the chosen paper; pages whose orientation differs from the majority are turned 90° (like Acrobat's auto-rotate)
-  const dims = list.map(pg => dispSize(pg)), portrait = dims.filter(d => d.height >= d.width).length >= dims.length / 2;
+  const root = $('#print-root'), imgs = [], mode = plan[0]?.mode || 'real';
   try {
-    for (let i = 0; i < list.length; i++) {
-      busy(`Preparando impresión… ${i + 1}/${list.length}`); await sleep(0);
-      let { canvas, wPt, hPt } = await rasterPage(list[i], dpi / 72, { annots });
-      if (mode === 'fit' && (canvas.height >= canvas.width) !== portrait) {
-        const r = document.createElement('canvas'); r.width = canvas.height; r.height = canvas.width;
-        // turn it back the way that undoes the page's own rotation, so the content prints upright
-        const x = r.getContext('2d'), cw = totalRot(list[i]) === 270;
-        if (cw) { x.translate(r.width, 0); x.rotate(Math.PI / 2); } else { x.translate(0, r.height); x.rotate(-Math.PI / 2); }
-        x.drawImage(canvas, 0, 0);
-        canvas.width = canvas.height = 0; canvas = r; [wPt, hPt] = [hPt, wPt];
-      }
-      const blob = await new Promise(res => canvas.toBlob(res, dpi >= 300 ? 'image/png' : 'image/jpeg', 0.92));
-      canvas.width = canvas.height = 0;
-      if (!blob) throw new Error('No se pudo preparar la página ' + (i + 1));
+    for (let i = 0; i < plan.length; i++) {
+      const it = plan[i];
+      busy(`Preparando impresión… ${i + 1}/${plan.length}`); await sleep(0);
+      const { canvas } = await rasterPage(it.pg, dpi / 72, { annots });
+      const c = turnCanvas(canvas, it.turn);
+      const blob = await new Promise(res => c.toBlob(res, dpi >= 300 ? 'image/png' : 'image/jpeg', 0.92));
+      c.width = c.height = 0;
+      if (!blob) throw new Error('No se pudo preparar la hoja ' + (i + 1));
       const url = URL.createObjectURL(blob); printUrls.push(url);
       const img = el('img', { src: url, alt: '' }); imgs.push(img);
-      const style = mode === 'fit' ? 'width:100vw;height:calc(100vh - 0.5px)' : `width:${(wPt * 25.4 / 72).toFixed(2)}mm;height:${(hPt * 25.4 / 72 - 0.2).toFixed(2)}mm`;
       if (mode === 'fit') img.style.objectFit = 'contain';
+      const style = mode === 'fit' ? 'width:100vw;height:calc(100vh - 0.5px)' : `width:${(it.wPt * 25.4 / 72).toFixed(2)}mm;height:${(it.hPt * 25.4 / 72 - 0.2).toFixed(2)}mm`;
       root.append(el('div', { class: 'pp', style }, img));
     }
-    const d0 = dims[0];
-    $('#print-pages').textContent = mode === 'fit' ? `@page{size:${portrait ? 'portrait' : 'landscape'};margin:0}`
-      : `@page{size:${(d0.width * 25.4 / 72).toFixed(2)}mm ${(d0.height * 25.4 / 72).toFixed(2)}mm;margin:0}`;
+    const it0 = plan[0];
+    $('#print-pages').textContent = mode === 'fit' ? `@page{size:${it0.portrait ? 'portrait' : 'landscape'};margin:0}`
+      : `@page{size:${(it0.wPt * 25.4 / 72).toFixed(2)}mm ${(it0.hPt * 25.4 / 72).toFixed(2)}mm;margin:0}`;
     busy('Abriendo la impresora…');
     await Promise.all(imgs.map(im => im.decode().catch(() => {})));
     unbusy(); await raf(); await raf();
