@@ -217,6 +217,18 @@ details.box>summary small{font:500 10px/1 var(--f-label);text-transform:uppercas
   .docname input{padding:5px 4px}
   .brand-txt{display:none}
 }
+#print-root{display:none}
+.pr-opts{display:flex;flex-direction:column;gap:8px}
+.pr-opts label.check{align-items:center}
+@media print{
+  html,body{height:auto!important;overflow:visible!important;background:#fff!important}
+  #app,.toasts,.busy,.modal-bg,.dropveil{display:none!important}
+  #print-root{display:block!important}
+  #print-root .pp{display:block;overflow:hidden;break-after:page;page-break-after:always;margin:0;padding:0}
+  #print-root .pp:last-child{break-after:auto;page-break-after:auto}
+  #print-root img{display:block;width:100%;height:100%;object-fit:fill}
+  #print-root .pr-empty{font:14pt/1.4 system-ui,sans-serif;padding:20mm}
+}
 @media (prefers-reduced-motion: reduce){ .toast,.spin{animation:none} details.box>summary::after{transition:none} }
 </style>
 
@@ -244,6 +256,7 @@ details.box>summary small{font:500 10px/1 var(--f-label);text-transform:uppercas
   <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
   <symbol id="i-redo" viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></symbol>
   <symbol id="i-open" viewBox="0 0 24 24"><path d="M3.5 6.5A1.5 1.5 0 0 1 5 5h4l2 2h8a1.5 1.5 0 0 1 1.5 1.5V18a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 18z"/></symbol>
+  <symbol id="i-print" viewBox="0 0 24 24"><path d="M7 9V4h10v5M7 17H5a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-2"/><rect x="7" y="14" width="10" height="6" rx="1"/></symbol>
   <symbol id="i-save" viewBox="0 0 24 24"><path d="M12 3.5v11M7.5 10l4.5 4.5 4.5-4.5M5 20h14"/></symbol>
   <symbol id="i-minus" viewBox="0 0 24 24"><path d="M6 12h12"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></symbol>
@@ -282,6 +295,7 @@ details.box>summary small{font:500 10px/1 var(--f-label);text-transform:uppercas
       <button class="btn icon ghost" id="b-zfit" title="Ajustar al ancho" aria-label="Ajustar al ancho"><svg class="i"><use href="#i-fit"/></svg></button>
     </div>
     <button class="btn" id="b-install" hidden title="Instalar MiPDFeditor como aplicación"><svg class="i"><use href="#i-save"/></svg><span class="hide-sm">Instalar app</span></button>
+    <button class="btn" id="b-print" title="Imprimir (Ctrl+P)"><svg class="i"><use href="#i-print"/></svg><span class="hide-sm">Imprimir</span></button>
     <button class="btn primary" id="b-save" title="Guardar (Ctrl+S)"><svg class="i"><use href="#i-save"/></svg><span id="save-lbl">Guardar PDF</span></button>
     <button class="btn icon" id="b-saveas" hidden title="Guardar como… (Ctrl+Mayús+S)" aria-label="Guardar como"><svg class="i"><use href="#i-dup"/></svg></button>
     <button class="btn icon ghost" id="b-panel" title="Mostrar u ocultar el panel" aria-label="Panel"><svg class="i"><use href="#i-panel"/></svg></button>
@@ -439,6 +453,8 @@ details.box>summary small{font:500 10px/1 var(--f-label);text-transform:uppercas
 <input type="file" id="fi-add" accept="application/pdf,.pdf,image/*" multiple hidden>
 <input type="file" id="fi-img" accept="image/*" hidden>
 <div class="toasts" id="toasts" aria-live="polite"></div>
+<div id="print-root"></div>
+<style id="print-pages"></style>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -718,10 +734,11 @@ async function renderBase(pg, scale, { useCache = true } = {}) {
   if (useCache) cachePut(key, c);
   return c;
 }
-async function rasterPage(pg, scale) {
+async function rasterPage(pg, scale, { annots = true } = {}) {
   const base = await renderBase(pg, scale, { useCache: false });
   const vp = makeVP(pg.box, scale, totalRot(pg));
-  const ctx = base.getContext('2d'); paintAnnots(ctx, pg, vp, 1, { decor: true });
+  const ctx = base.getContext('2d');
+  if (annots) paintAnnots(ctx, pg, vp, 1, { decor: true });
   return { canvas: base, wPt: vp.width / scale, hPt: vp.height / scale };
 }
 const canvasBytes = (c, type = 'image/png', q = 0.92) => new Promise((res, rej) => c.toBlob(b => b ? b.arrayBuffer().then(x => res(new Uint8Array(x))) : rej(new Error('No se pudo codificar la imagen')), type, q));
@@ -1374,7 +1391,7 @@ function renderProps() {
   }
   if (S.tool === 'place') P.append(el('button', { class: 'btn sm', onclick: () => { S.pendingImg = null; setTool('select'); } }, 'Cancelar'));
   P.append(el('div', { class: 'sec-title', style: 'margin-top:6px', text: 'Atajos' }), el('p', { class: 'hint' },
-    shortcutRow([['V', 'mover'], ['T', 'texto'], ['H', 'resaltar'], ['D', 'dibujar'], ['R', 'recuadro'], ['L', 'línea'], ['W', 'tapar'], ['X', 'redactar'], ['S', 'firmar'], ['I', 'imagen'], ['Ctrl+Z', 'deshacer'], ['Ctrl+S', 'guardar']])));
+    shortcutRow([['V', 'mover'], ['T', 'texto'], ['H', 'resaltar'], ['D', 'dibujar'], ['R', 'recuadro'], ['L', 'línea'], ['W', 'tapar'], ['X', 'redactar'], ['S', 'firmar'], ['I', 'imagen'], ['Ctrl+Z', 'deshacer'], ['Ctrl+S', 'guardar'], ['Ctrl+P', 'imprimir']])));
 }
 function shortcutRow(list) { const f = document.createDocumentFragment(); list.forEach(([k, d], i) => { f.append(el('span', { class: 'kbd', text: k }), ' ' + d + (i < list.length - 1 ? '  ·  ' : '')); }); return f; }
 function fontControls(obj, after) {
@@ -1684,12 +1701,107 @@ async function applyFields(src) {
   } catch (e) { console.error(e); toast('No se pudo actualizar el campo: ' + e.message, true); }
 }
 
+/* ───────────── print ───────────── */
+let printing = false, printUrls = [];
+function clearPrint() { printUrls.forEach(u => URL.revokeObjectURL(u)); printUrls = []; $('#print-root').innerHTML = ''; $('#print-pages').textContent = ''; printing = false; }
+window.addEventListener('afterprint', () => setTimeout(clearPrint, 300));
+// printing from the browser menu instead of our button: show a hint rather than the app UI
+window.addEventListener('beforeprint', () => { if (!printing && !$('#print-root').children.length) $('#print-root').innerHTML = '<div class="pr-empty">Para imprimir el documento usa el botón <b>Imprimir</b> de MiPDFeditor o <b>Ctrl+P</b>.</div>'; });
+function openPrintDialog() {
+  if (!S.pages.length) return toast('No hay ningún documento abierto.', true);
+  closeTextEditor(true);
+  const n = S.pages.length, curIdx = Math.max(0, S.pages.findIndex(p => p.uid === S.current)), nSel = S.pages.filter(p => S.sel.has(p.uid)).length;
+  const radio = (v, label, checked, disabled) => el('label', { class: 'check' }, el('input', { type: 'radio', name: 'pr-scope', value: v, checked, disabled }), label);
+  const range = el('input', { class: 'inp', id: 'pr-range', placeholder: 'p. ej. 1-3, 5, 8-fin', style: 'font-family:var(--f-mono);max-width:220px', spellcheck: 'false' });
+  range.addEventListener('focus', () => { body.querySelector('input[value="range"]').checked = true; });
+  const quality = el('select', { class: 'inp', id: 'pr-q' }, el('option', { value: '200', text: 'Normal (200 ppp)' }), el('option', { value: '300', text: 'Alta (300 ppp) · planos y letra pequeña' }));
+  const ann = el('input', { type: 'checkbox', id: 'pr-ann', checked: true });
+  const fit = el('select', { class: 'inp', id: 'pr-fit' }, el('option', { value: 'real', text: 'Tamaño real (100 %)' }), el('option', { value: 'fit', text: 'Ajustar al papel (gira las páginas apaisadas)' }));
+  const fitHint = el('p', { class: 'hint', style: 'margin-top:-4px' });
+  const scopeList = () => {
+    const scope = body.querySelector('input[name="pr-scope"]:checked')?.value || 'all';
+    try { return scope === 'all' ? S.pages : scope === 'cur' ? [S.pages[curIdx]] : scope === 'sel' ? S.pages.filter(p => S.sel.has(p.uid)) : parseRanges(range.value, n).flatMap(g => g.idx).map(i => S.pages[i]); } catch { return S.pages; }
+  };
+  const sizeKey = pg => { const d = dispSize(pg); return `${Math.round(d.width)}x${Math.round(d.height)}`; };
+  const syncFit = (auto) => {
+    const mixed = new Set(scopeList().map(sizeKey)).size > 1;
+    fit.querySelector('option[value="real"]').disabled = mixed;
+    if (mixed || auto === true) fit.value = mixed ? 'fit' : 'real';
+    fitHint.textContent = mixed ? 'Las páginas elegidas tienen tamaños u orientaciones distintas: se ajustan al papel que elijas en la impresora.' : fit.value === 'real' ? 'Cada hoja a su medida exacta: útil para planos a escala. Elige en la impresora un papel de ese tamaño.' : 'Se ajusta al papel que elijas en la impresora.';
+  };
+  fit.addEventListener('change', () => syncFit(false));
+  const body = el('div', { class: 'pr-opts' },
+    el('div', { class: 'sec-title', text: 'Páginas' }),
+    radio('all', `Todas (${n})`, true), radio('cur', `Página actual (${curIdx + 1})`, false),
+    radio('sel', `Seleccionadas${nSel ? ` (${nSel})` : ''}`, false, !nSel),
+    el('div', { class: 'row' }, radio('range', 'Rango:', false), range),
+    el('div', { class: 'sec-title', style: 'margin-top:6px', text: 'Opciones' }),
+    el('label', { class: 'field' }, el('span', { text: 'Tamaño' }), fit), fitHint,
+    el('label', { class: 'field' }, el('span', { text: 'Calidad' }), quality),
+    el('label', { class: 'check' }, ann, 'Incluir anotaciones, firmas, marca de agua y numeración'),
+    el('p', { class: 'hint', text: 'En el siguiente paso eliges impresora, copias, doble cara y papel. Cada página se imprime a su tamaño real.' }));
+  body.addEventListener('change', e => { if (e.target.name === 'pr-scope') syncFit(true); });
+  range.addEventListener('input', () => syncFit(true));
+  syncFit(true);
+  modal('Imprimir', body, close => [
+    el('button', { class: 'btn', onclick: close }, 'Cancelar'),
+    el('button', { class: 'btn primary', onclick: async () => {
+      const scope = body.querySelector('input[name="pr-scope"]:checked').value; let list;
+      try {
+        if (scope === 'all') list = S.pages;
+        else if (scope === 'cur') list = [S.pages[curIdx]];
+        else if (scope === 'sel') list = S.pages.filter(p => S.sel.has(p.uid));
+        else list = parseRanges(range.value, n).flatMap(g => g.idx).map(i => S.pages[i]);
+      } catch (e) { return toast(e.message, true); }
+      if (!list.length) return toast('No hay páginas que imprimir.', true);
+      const mode = new Set(list.map(sizeKey)).size > 1 ? 'fit' : fit.value;
+      close(); await doPrint(list, +quality.value, ann.checked, mode);
+    } }, icon('print'), 'Imprimir')]);
+}
+async function doPrint(list, dpi, annots, mode = 'real') {
+  clearPrint(); printing = true;
+  const root = $('#print-root'), imgs = [];
+  // 'fit': every page fills the chosen paper; pages whose orientation differs from the majority are turned 90° (like Acrobat's auto-rotate)
+  const dims = list.map(pg => dispSize(pg)), portrait = dims.filter(d => d.height >= d.width).length >= dims.length / 2;
+  try {
+    for (let i = 0; i < list.length; i++) {
+      busy(`Preparando impresión… ${i + 1}/${list.length}`); await sleep(0);
+      let { canvas, wPt, hPt } = await rasterPage(list[i], dpi / 72, { annots });
+      if (mode === 'fit' && (canvas.height >= canvas.width) !== portrait) {
+        const r = document.createElement('canvas'); r.width = canvas.height; r.height = canvas.width;
+        // turn it back the way that undoes the page's own rotation, so the content prints upright
+        const x = r.getContext('2d'), cw = totalRot(list[i]) === 270;
+        if (cw) { x.translate(r.width, 0); x.rotate(Math.PI / 2); } else { x.translate(0, r.height); x.rotate(-Math.PI / 2); }
+        x.drawImage(canvas, 0, 0);
+        canvas.width = canvas.height = 0; canvas = r; [wPt, hPt] = [hPt, wPt];
+      }
+      const blob = await new Promise(res => canvas.toBlob(res, dpi >= 300 ? 'image/png' : 'image/jpeg', 0.92));
+      canvas.width = canvas.height = 0;
+      if (!blob) throw new Error('No se pudo preparar la página ' + (i + 1));
+      const url = URL.createObjectURL(blob); printUrls.push(url);
+      const img = el('img', { src: url, alt: '' }); imgs.push(img);
+      const style = mode === 'fit' ? 'width:100vw;height:calc(100vh - 0.5px)' : `width:${(wPt * 25.4 / 72).toFixed(2)}mm;height:${(hPt * 25.4 / 72 - 0.2).toFixed(2)}mm`;
+      if (mode === 'fit') img.style.objectFit = 'contain';
+      root.append(el('div', { class: 'pp', style }, img));
+    }
+    const d0 = dims[0];
+    $('#print-pages').textContent = mode === 'fit' ? `@page{size:${portrait ? 'portrait' : 'landscape'};margin:0}`
+      : `@page{size:${(d0.width * 25.4 / 72).toFixed(2)}mm ${(d0.height * 25.4 / 72).toFixed(2)}mm;margin:0}`;
+    busy('Abriendo la impresora…');
+    await Promise.all(imgs.map(im => im.decode().catch(() => {})));
+    unbusy(); await raf(); await raf();
+    window.print();
+  } catch (e) { console.error(e); unbusy(); toast('No se pudo imprimir: ' + (e.message || e), true); clearPrint(); }
+}
+$('#b-print').onclick = openPrintDialog;
+
 /* ───────────── keyboard, drag & drop ───────────── */
 document.addEventListener('keydown', e => {
   const tag = e.target.tagName; const typing = /INPUT|TEXTAREA|SELECT/.test(tag) || e.target.isContentEditable;
   const mod = e.ctrlKey || e.metaKey;
   if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); e.shiftKey ? saveAs() : saveMain(); return; }
   if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); openDialog(); return; }
+  if (mod && e.key.toLowerCase() === 'p') { e.preventDefault(); if (!document.querySelector('.modal-bg')) openPrintDialog(); return; }
   if (typing || document.querySelector('.modal-bg')) return;
   if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
