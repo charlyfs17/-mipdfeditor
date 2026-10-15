@@ -1,5 +1,5 @@
 // MiPDFeditor service worker: makes the app work offline after the first visit.
-const CACHE = 'mipdfeditor-v7';
+const CACHE = 'mipdfeditor-v8';
 const CORE = [
   './', './index.html', './manifest.webmanifest', './icon-v5.svg', './icon-192-v5.png', './icon-512-v5.png', './icon-maskable-v5.png',
   'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js',

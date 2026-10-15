@@ -314,7 +314,7 @@ details.box>summary small{font:500 10px/1 var(--f-label);text-transform:uppercas
     <button class="btn" id="b-install" hidden title="Instalar MiPDFeditor como aplicación"><svg class="i"><use href="#i-save"/></svg><span class="hide-sm">Instalar app</span></button>
     <button class="btn" id="b-print" title="Imprimir (Ctrl+P)"><svg class="i"><use href="#i-print"/></svg><span class="hide-sm">Imprimir</span></button>
     <button class="btn primary" id="b-save" title="Guardar (Ctrl+S)"><svg class="i"><use href="#i-save"/></svg><span id="save-lbl">Guardar PDF</span></button>
-    <button class="btn icon" id="b-saveas" hidden title="Guardar como… (Ctrl+Mayús+S)" aria-label="Guardar como"><svg class="i"><use href="#i-dup"/></svg></button>
+    <button class="btn" id="b-saveas" hidden title="Guardar como… elegir carpeta y nombre (Ctrl+Mayús+S)"><svg class="i"><use href="#i-open"/></svg><span class="hide-sm">Guardar como…</span></button>
     <button class="btn icon ghost" id="b-panel" title="Mostrar u ocultar el panel" aria-label="Panel"><svg class="i"><use href="#i-panel"/></svg></button>
   </header>
 
@@ -458,6 +458,9 @@ details.box>summary small{font:500 10px/1 var(--f-label);text-transform:uppercas
             <button class="btn sm" id="b-text">Extraer texto</button>
           </div>
         </details>
+        <label class="field" style="margin-bottom:4px"><span>Al pulsar Guardar</span>
+          <select class="inp" id="savemode"><option value="ask">Preguntar siempre dónde guardar</option><option value="overwrite">Sobrescribir el PDF original sin preguntar</option></select>
+        </label>
         <label class="check"><input type="checkbox" id="flatten" checked>Al guardar, fijar los campos de formulario (dejan de ser editables y se ven igual en cualquier visor)</label>
       </div>
     </aside>
@@ -869,11 +872,46 @@ async function saveFile(name, data) {
       return false;
     }
   }
+  if (canPick) {
+    let h;
+    try { h = await pickTarget(name); }
+    catch (e) {
+      // the browser only opens the save dialog right after a click; long exports lose that, so ask for one more click
+      if (e.name === 'SecurityError' || e.name === 'NotAllowedError') h = await readyThenPick(name, blob);
+      else { toast('No se pudo abrir el diálogo de guardar: ' + (e.message || e), true); return false; }
+    }
+    if (!h) { toast('Guardado cancelado'); return false; }
+    try { await writeHandle(h, blob); } catch (e) { toast('No se pudo escribir el archivo: ' + (e.message || e), true); return false; }
+    toast(`Guardado: ${h.name} (${fmtSize(blob.size)})`);
+    return h;
+  }
   const url = URL.createObjectURL(blob);
   const a = el('a', { href: url, download: name }); document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 30000);
-  toast(`Guardado: ${name} (${fmtSize(blob.size)})`);
+  toast(`Descargado en la carpeta Descargas: ${name} (${fmtSize(blob.size)})`);
   return true;
+}
+const PICK_TYPES = { pdf: ['Documento PDF', 'application/pdf'], zip: ['Archivo ZIP', 'application/zip'], png: ['Imagen PNG', 'image/png'], jpg: ['Imagen JPG', 'image/jpeg'], txt: ['Texto', 'text/plain'] };
+// opens Windows' "Guardar como" in the original file's folder (or the last folder used), with the suggested name
+async function pickTarget(name) {
+  const ext = name.split('.').pop().toLowerCase(), t = PICK_TYPES[ext];
+  const opts = { suggestedName: name, id: 'mipdfeditor-guardar' };
+  if (t) opts.types = [{ description: t[0], accept: { [t[1]]: ['.' + ext] } }];
+  const tryPick = async o => { try { return await showSaveFilePicker(o); } catch (e) { if (e.name === 'AbortError') return null; throw e; } };
+  if (S.fileHandle) {
+    try { return await tryPick({ ...opts, startIn: S.fileHandle }); }
+    catch (e) { if (e.name === 'SecurityError' || e.name === 'NotAllowedError') throw e; }
+  }
+  return tryPick(opts);
+}
+function readyThenPick(name, blob) {
+  return new Promise(resolve => {
+    let done = false;
+    const finish = v => { if (!done) { done = true; resolve(v); } };
+    const close = modal('Archivo listo', el('p', { style: 'margin:0' }, el('b', { text: name }), ` (${fmtSize(blob.size)}) está preparado. Elige la carpeta donde guardarlo.`), c => [
+      el('button', { class: 'btn', onclick: () => { finish(null); c(); } }, 'Cancelar'),
+      el('button', { class: 'btn primary', onclick: async () => { let h = null; try { h = await pickTarget(name); } catch (e) { toast('No se pudo abrir el diálogo: ' + (e.message || e), true); } finish(h); c(); } }, icon('open'), 'Elegir dónde guardar')], { onClose: () => finish(null) });
+  });
 }
 
 /* ───────────── PDF export ───────────── */
@@ -965,9 +1003,16 @@ async function guarded(fn, label) {
 }
 const outName = suffix => baseName(S.fileName) + suffix;
 const canPick = 'showSaveFilePicker' in window && window.self === window.top;
+let saveMode = 'ask';
+try { saveMode = localStorage.getItem('mipdfeditor.savemode') || 'ask'; } catch {}
+const saveModeSel = document.getElementById('savemode');
+if (saveModeSel) { saveModeSel.value = saveMode; saveModeSel.addEventListener('change', e => { saveMode = e.target.value; try { localStorage.setItem('mipdfeditor.savemode', saveMode); } catch {} updateSaveUI(); }); }
 function updateSaveUI() {
-  $('#save-lbl').textContent = S.fileHandle ? 'Guardar' : 'Guardar PDF';
-  $('#b-save').title = S.fileHandle ? `Guardar cambios en ${S.fileHandle.name} (Ctrl+S)` : 'Descargar el PDF (Ctrl+S)';
+  const overwrite = canPick && saveMode === 'overwrite' && S.fileHandle;
+  $('#save-lbl').textContent = 'Guardar';
+  $('#b-save').title = !canPick ? 'Descargar el PDF en la carpeta Descargas (Ctrl+S)'
+    : overwrite ? `Sobrescribir ${S.fileHandle.name} (Ctrl+S). Para elegir otro sitio usa Guardar como…`
+    : `Elegir dónde guardar${S.fileHandle ? ` (empieza en la carpeta de ${S.fileHandle.name})` : ''} (Ctrl+S)`;
   $('#b-saveas').hidden = !canPick;
 }
 async function writeHandle(h, bytes) { const w = await h.createWritable(); await w.write(bytes); await w.close(); }
@@ -975,25 +1020,27 @@ async function saveMain() {
   if (!S.pages.length) return toast('No hay páginas que guardar.', true);
   closeTextEditor(true);
   const h = S.fileHandle && S.fileHandle.name.toLowerCase() === S.fileName.toLowerCase() ? S.fileHandle : null;
-  if (h) {
+  if (canPick && saveMode === 'overwrite' && h) {
     // ask for write permission while we still have the click/keypress gesture
     let ok = false;
     try { ok = (await h.queryPermission({ mode: 'readwrite' })) === 'granted' || (await h.requestPermission({ mode: 'readwrite' })) === 'granted'; } catch {}
     if (ok) return guarded(async () => { busy('Guardando…'); const bytes = await buildPdf(S.pages); await writeHandle(h, bytes); unbusy(); toast(`Guardado en ${h.name} (${fmtSize(bytes.length)})`); }, 'No se pudo guardar');
-    toast('Sin permiso para sobrescribir el archivo original. Se descargará una copia.');
+    toast('Sin permiso para sobrescribir el original: elige dónde guardar.');
   }
-  await guarded(async () => { busy('Generando PDF…'); const bytes = await buildPdf(S.pages); unbusy(); await saveFile(baseName(S.fileName) + '.pdf', bytes); }, 'No se pudo generar el PDF');
+  return saveAs();
 }
 async function saveAs() {
   if (!S.pages.length) return toast('No hay páginas que guardar.', true);
-  if (!canPick) return saveMain();
   closeTextEditor(true);
+  if (!canPick) return guarded(async () => { busy('Generando PDF…'); const bytes = await buildPdf(S.pages); unbusy(); await saveFile(baseName(S.fileName) + '.pdf', bytes); }, 'No se pudo generar el PDF');
   let h;
-  try { h = await showSaveFilePicker({ suggestedName: baseName(S.fileName) + '.pdf', types: [{ description: 'Documento PDF', accept: { 'application/pdf': ['.pdf'] } }] }); }
-  catch (e) { if (e.name !== 'AbortError') toast('No se pudo abrir el diálogo: ' + e.message, true); return; }
+  try { h = await pickTarget(baseName(S.fileName) + '.pdf'); }
+  catch (e) { toast('No se pudo abrir el diálogo de guardar: ' + (e.message || e), true); return; }
+  if (!h) return toast('Guardado cancelado');
   await guarded(async () => {
     busy('Guardando…'); const bytes = await buildPdf(S.pages); await writeHandle(h, bytes); unbusy();
-    S.fileHandle = h; S.fileName = h.name; syncDocFields(); updateSaveUI(); toast(`Guardado como ${h.name}`);
+    S.fileHandle = h; S.fileName = h.name; S.isSample = false; syncDocFields(); updateSaveUI(); updateSampleUI?.();
+    toast(`Guardado: ${h.name} (${fmtSize(bytes.length)})`);
   }, 'No se pudo guardar');
 }
 async function openDialog() {
